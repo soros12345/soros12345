@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>School Automation System - Home</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            padding: 0;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            width: 80%;
+            margin: auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        nav ul {
+            list-style-type: none;
+            padding: 0;
+            text-align: center;
+        }
+        nav ul li {
+            display: inline-block;
+            margin: 0 15px;
+        }
+        nav ul li a {
+            text-decoration: none;
+            color: #fff;
+            background-color: #5cb85c;
+            padding: 10px 20px;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+        nav ul li a:hover {
+            background-color: #4cae4c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Welcome to the School Automation System</h1>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('list_students') }}">Manage Students</a></li>
+                <li><a href="{{ url_for('list_courses') }}">Manage Courses</a></li>
+            </ul>
+        </nav>
+    </div>
+</body>
+</html>
