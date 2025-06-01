@@ -58,15 +58,27 @@
                 <textarea id="description" name="description" required>{{ course.description if course else '' }}</textarea>
             </div>
             <div>
-                <label for="teacher_id">Teacher ID (Optional):</label>
-                <input type="text" id="teacher_id" name="teacher_id" value="{{ course.teacher_id if course and course.teacher_id is not none else '' }}">
+                <label for="teacher_id">Teacher:</label>
+                <select name="teacher_id" id="teacher_id">
+                    <option value="">-- Select Teacher --</option>
+                    {% for teacher in teachers %}
+                        <option value="{{ teacher.id }}" {% if course and course.teacher_id == teacher.id %}selected{% endif %}>
+                            {{ teacher.name }}
+                        </option>
+                    {% endfor %}
+                </select>
             </div>
             <div>
                 <input type="submit" value="{{ submit_button_text }}">
             </div>
         </form>
-        <a href="{{ url_for('list_courses') }}" class="back-link">Back to Course List</a>
-        <a href="{{ url_for('home') }}" class="back-link">Home</a>
+        <hr>
+        <p>
+            <a href="{{ url_for('list_courses') }}" class="back-link">Back to Course List</a> |
+            <a href="{{ url_for('home') }}" class="back-link">Home</a> |
+            <a href="{{ url_for('list_students') }}" class="back-link">Manage Students</a> |
+            <a href="{{ url_for('list_teachers') }}" class="back-link">Manage Teachers</a>
+        </p>
     </div>
 </body>
 </html>

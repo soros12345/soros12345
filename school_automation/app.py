@@ -1,163 +1,287 @@
-from flask import Flask, render_template, request, redirect, url_for, abort
+from flask import Flask, render_template, request, redirect, url_for, abort, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 
 app = Flask(__name__)
+app.secret_key = 'dev_secret_key' # Needed for flash messages
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///school.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# In-memory database for students
-students_db = []
-next_student_id = 1
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
-# In-memory database for courses
-# Course structure: {'id': int, 'name': str, 'description': str, 'teacher_id': int/str/None}
-courses_db = []
-next_course_id = 1
+# Models
+class Student(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), nullable=False, unique=True)
+
+    def __repr__(self):
+        return f'<Student {self.name}>'
+
+class Course(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.String(200))
+    teacher_id = db.Column(db.Integer, db.ForeignKey('teacher.id'), nullable=True)
+    teacher = db.relationship('Teacher', backref=db.backref('courses_taught', lazy=True))
+
+    def __repr__(self):
+        return f'<Course {self.name}>'
+
+class Teacher(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), nullable=False, unique=True)
+    # courses_taught is available via backref from Course.teacher
+
+    def __repr__(self):
+        return f'<Teacher {self.name}>'
 
 @app.route('/')
 def home():
     return render_template('home.html')
 
-# Route to list students
+# Student Management Routes
 @app.route('/students')
 def list_students():
-    return render_template('students.html', students=students_db)
+    students = Student.query.all()
+    return render_template('students.html', students=students)
 
-# Route to add a new student
 @app.route('/students/add', methods=['GET', 'POST'])
 def add_student():
-    global next_student_id
     if request.method == 'POST':
         name = request.form['name']
         email = request.form['email']
-        new_student = {
-            'id': next_student_id,
-            'name': name,
-            'email': email
-        }
-        students_db.append(new_student)
-        next_student_id += 1
+
+        # Check if email already exists
+        existing_student = Student.query.filter_by(email=email).first()
+        if existing_student:
+            # Handle error: email already exists
+            # For now, let's just render the form again with a message (not implemented yet)
+            # Or simply redirect back to the form or student list.
+            # A flash message would be good here.
+            return redirect(url_for('add_student')) # Or render_template with error
+
+        new_student = Student(name=name, email=email)
+        db.session.add(new_student)
+        db.session.commit()
         return redirect(url_for('list_students'))
-    
-    # For GET request, show the form
-    return render_template('student_form.html', 
-                           title='Add Student', 
-                           action_url=url_for('add_student'), 
-                           submit_button_text='Add Student', 
+
+    return render_template('student_form.html',
+                           title='Add Student',
+                           action_url=url_for('add_student'),
+                           submit_button_text='Add Student',
                            student=None)
 
-# Route to edit an existing student
 @app.route('/students/edit/<int:student_id>', methods=['GET', 'POST'])
 def edit_student(student_id):
-    student_to_edit = None
-    for student in students_db:
-        if student['id'] == student_id:
-            student_to_edit = student
-            break
-    
-    if student_to_edit is None:
-        abort(404) # Or return a custom error page
+    student_to_edit = Student.query.get_or_404(student_id)
 
     if request.method == 'POST':
-        student_to_edit['name'] = request.form['name']
-        student_to_edit['email'] = request.form['email']
+        new_email = request.form['email']
+        # Check if the new email is already used by another student
+        existing_student_with_new_email = Student.query.filter(Student.id != student_id, Student.email == new_email).first()
+        if existing_student_with_new_email:
+            # Email already in use by another student, handle error
+            # For now, redirect or render with error. Flash message would be good.
+            return redirect(url_for('edit_student', student_id=student_id))
+
+
+        student_to_edit.name = request.form['name']
+        student_to_edit.email = new_email
+        db.session.commit()
         return redirect(url_for('list_students'))
-    
-    # For GET request, show the form with student's data
-    return render_template('student_form.html', 
-                           title='Edit Student', 
-                           action_url=url_for('edit_student', student_id=student_id), 
-                           submit_button_text='Save Changes', 
+
+    return render_template('student_form.html',
+                           title='Edit Student',
+                           action_url=url_for('edit_student', student_id=student_id),
+                           submit_button_text='Save Changes',
                            student=student_to_edit)
 
-# Route to delete a student
 @app.route('/students/delete/<int:student_id>', methods=['POST'])
 def delete_student(student_id):
-    global students_db
-    student_to_delete = None
-    for student in students_db:
-        if student['id'] == student_id:
-            student_to_delete = student
-            break
-            
-    if student_to_delete:
-        students_db.remove(student_to_delete)
-    else:
-        # Optionally, handle the case where the student is not found, 
-        # though the form structure should prevent this.
-        abort(404) 
-        
+    student_to_delete = Student.query.get_or_404(student_id)
+    db.session.delete(student_to_delete)
+    db.session.commit()
     return redirect(url_for('list_students'))
 
 # Course Management Routes
-
-# Route to list courses
 @app.route('/courses')
 def list_courses():
-    return render_template('courses.html', courses=courses_db)
+    courses = Course.query.all()
+    return render_template('courses.html', courses=courses)
 
-# Route to add a new course
 @app.route('/courses/add', methods=['GET', 'POST'])
 def add_course():
-    global next_course_id
     if request.method == 'POST':
         name = request.form['name']
         description = request.form['description']
-        teacher_id = request.form.get('teacher_id') # Use .get for optional field
-        
-        new_course = {
-            'id': next_course_id,
-            'name': name,
-            'description': description,
-            'teacher_id': teacher_id if teacher_id else None # Store as None if empty
-        }
-        courses_db.append(new_course)
-        next_course_id += 1
-        return redirect(url_for('list_courses'))
-    
-    return render_template('course_form.html', 
-                           title='Add Course', 
-                           action_url=url_for('add_course'), 
-                           submit_button_text='Add Course', 
-                           course=None)
+        teacher_id_str = request.form.get('teacher_id')
 
-# Route to edit an existing course
+        final_teacher_id = None
+        if teacher_id_str: # Check if not empty or None
+            try:
+                final_teacher_id = int(teacher_id_str)
+            except ValueError:
+                flash('Invalid Teacher ID format.', 'error')
+                # Re-fetch teachers for rendering the form again with an error
+                teachers = Teacher.query.all()
+                return render_template('course_form.html',
+                                       title='Add Course',
+                                       action_url=url_for('add_course'),
+                                       submit_button_text='Add Course',
+                                       course={'name': name, 'description': description}, # pass current form data
+                                       teachers=teachers,
+                                       selected_teacher_id=teacher_id_str) # Pass invalid string to show selection
+
+        new_course = Course(name=name, description=description, teacher_id=final_teacher_id)
+        db.session.add(new_course)
+        db.session.commit()
+        flash(f"Course '{name}' added successfully!", 'success')
+        return redirect(url_for('list_courses'))
+
+    teachers = Teacher.query.all()
+    return render_template('course_form.html',
+                           title='Add Course',
+                           action_url=url_for('add_course'),
+                           submit_button_text='Add Course',
+                           course=None,
+                           teachers=teachers)
+
 @app.route('/courses/edit/<int:course_id>', methods=['GET', 'POST'])
 def edit_course(course_id):
-    course_to_edit = None
-    for course in courses_db:
-        if course['id'] == course_id:
-            course_to_edit = course
-            break
-    
-    if course_to_edit is None:
-        abort(404)
+    course_to_edit = Course.query.get_or_404(course_id)
 
     if request.method == 'POST':
-        course_to_edit['name'] = request.form['name']
-        course_to_edit['description'] = request.form['description']
-        course_to_edit['teacher_id'] = request.form.get('teacher_id') if request.form.get('teacher_id') else None
-        return redirect(url_for('list_courses'))
-    
-    return render_template('course_form.html', 
-                           title='Edit Course', 
-                           action_url=url_for('edit_course', course_id=course_id), 
-                           submit_button_text='Save Changes', 
-                           course=course_to_edit)
+        course_to_edit.name = request.form['name']
+        course_to_edit.description = request.form['description']
+        teacher_id_str = request.form.get('teacher_id')
 
-# Route to delete a course
+        final_teacher_id = None
+        if teacher_id_str: # Check if not empty or None
+            try:
+                final_teacher_id = int(teacher_id_str)
+            except ValueError:
+                flash('Invalid Teacher ID format.', 'error')
+                # Re-fetch teachers for rendering the form again with an error
+                teachers = Teacher.query.all()
+                # Pass back current form data, including the problematic teacher_id string
+                # The course object for the form should reflect what the user was trying to save
+                current_form_data = {
+                    'id': course_id, # needed for action_url
+                    'name': course_to_edit.name,
+                    'description': course_to_edit.description,
+                    # For teacher_id, we'd ideally show the selection that caused error
+                    # but course.teacher_id expects an int. So, we'll manage selected_teacher_id in template
+                }
+                return render_template('course_form.html',
+                                       title='Edit Course',
+                                       action_url=url_for('edit_course', course_id=course_id),
+                                       submit_button_text='Save Changes',
+                                       course=course_to_edit, # pass original course to prefill if needed
+                                       teachers=teachers,
+                                       # Add a way to show the attempted selection if it was invalid
+                                       # For simplicity, we might just let it default or clear
+                                      )
+
+        course_to_edit.teacher_id = final_teacher_id
+        db.session.commit()
+        flash(f"Course '{course_to_edit.name}' updated successfully!", 'success')
+        return redirect(url_for('list_courses'))
+
+    teachers = Teacher.query.all()
+    return render_template('course_form.html',
+                           title='Edit Course',
+                           action_url=url_for('edit_course', course_id=course_id),
+                           submit_button_text='Save Changes',
+                           course=course_to_edit,
+                           teachers=teachers)
+
 @app.route('/courses/delete/<int:course_id>', methods=['POST'])
 def delete_course(course_id):
-    global courses_db
-    course_to_delete = None
-    for course in courses_db:
-        if course['id'] == course_id:
-            course_to_delete = course
-            break
-            
-    if course_to_delete:
-        courses_db.remove(course_to_delete)
-    else:
-        abort(404)
-        
+    course_to_delete = Course.query.get_or_404(course_id)
+    db.session.delete(course_to_delete)
+    db.session.commit()
     return redirect(url_for('list_courses'))
+
+# Teacher Management Routes
+@app.route('/teachers')
+def list_teachers():
+    teachers = Teacher.query.all()
+    return render_template('teachers.html', teachers=teachers)
+
+@app.route('/teachers/add', methods=['GET', 'POST'])
+def add_teacher():
+    if request.method == 'POST':
+        name = request.form['name']
+        email = request.form['email']
+
+        existing_teacher = Teacher.query.filter_by(email=email).first()
+        if existing_teacher:
+            flash(f"Teacher with email '{email}' already exists.", 'error')
+            return render_template('teacher_form.html',
+                                   title='Add Teacher',
+                                   action_url=url_for('add_teacher'),
+                                   submit_button_text='Add Teacher',
+                                   teacher={'name': name, 'email': email}) # Pass back current form data
+
+        new_teacher = Teacher(name=name, email=email)
+        db.session.add(new_teacher)
+        db.session.commit()
+        flash(f"Teacher '{name}' added successfully!", 'success')
+        return redirect(url_for('list_teachers'))
+
+    return render_template('teacher_form.html',
+                           title='Add Teacher',
+                           action_url=url_for('add_teacher'),
+                           submit_button_text='Add Teacher',
+                           teacher=None)
+
+@app.route('/teachers/edit/<int:teacher_id>', methods=['GET', 'POST'])
+def edit_teacher(teacher_id):
+    teacher_to_edit = Teacher.query.get_or_404(teacher_id)
+
+    if request.method == 'POST':
+        new_name = request.form['name']
+        new_email = request.form['email']
+
+        # Check if the new email is already used by another teacher
+        existing_teacher = Teacher.query.filter(Teacher.id != teacher_id, Teacher.email == new_email).first()
+        if existing_teacher:
+            flash(f"Another teacher with email '{new_email}' already exists.", 'error')
+            return render_template('teacher_form.html',
+                                   title='Edit Teacher',
+                                   action_url=url_for('edit_teacher', teacher_id=teacher_id),
+                                   submit_button_text='Save Changes',
+                                   teacher={'id': teacher_id, 'name': new_name, 'email': new_email})
+
+
+        teacher_to_edit.name = new_name
+        teacher_to_edit.email = new_email
+        db.session.commit()
+        flash(f"Teacher '{teacher_to_edit.name}' updated successfully!", 'success')
+        return redirect(url_for('list_teachers'))
+
+    return render_template('teacher_form.html',
+                           title='Edit Teacher',
+                           action_url=url_for('edit_teacher', teacher_id=teacher_id),
+                           submit_button_text='Save Changes',
+                           teacher=teacher_to_edit)
+
+@app.route('/teachers/delete/<int:teacher_id>', methods=['POST'])
+def delete_teacher(teacher_id):
+    teacher_to_delete = Teacher.query.get_or_404(teacher_id)
+    try:
+        db.session.delete(teacher_to_delete)
+        db.session.commit()
+        flash(f"Teacher '{teacher_to_delete.name}' deleted successfully!", 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error deleting teacher '{teacher_to_delete.name}': {str(e)}", 'error')
+        # Potentially, if there are related courses that prevent deletion due to foreign key constraints (once added)
+        # For now, this generic error handling is a placeholder.
+    return redirect(url_for('list_teachers'))
 
 if __name__ == '__main__':
     app.run(debug=True)

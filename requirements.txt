@@ -1,2 +1,4 @@
 Flask
 pytest
+Flask-SQLAlchemy
+Flask-Migrate

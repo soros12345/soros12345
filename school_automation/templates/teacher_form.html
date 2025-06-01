@@ -37,34 +37,54 @@
             background-color: #45a049;
         }
         .back-link {
-            display: block;
+            display: inline-block;
             margin-top: 15px;
+            margin-right: 10px;
+        }
+        .message {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+        .message.success {
+            border: 1px solid #d4edda;
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .message.error {
+            border: 1px solid #f5c6cb;
+            background-color: #f8d7da;
+            color: #721c24;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>{{ title }}</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="message {{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
         <form method="post" action="{{ action_url }}">
             <div>
                 <label for="name">Name:</label>
-                <input type="text" id="name" name="name" value="{{ student.name if student else '' }}" required>
+                <input type="text" id="name" name="name" value="{{ teacher.name if teacher else '' }}" required>
             </div>
             <div>
                 <label for="email">Email:</label>
-                <input type="email" id="email" name="email" value="{{ student.email if student else '' }}" required>
+                <input type="email" id="email" name="email" value="{{ teacher.email if teacher else '' }}" required>
             </div>
             <div>
                 <input type="submit" value="{{ submit_button_text }}">
             </div>
         </form>
-        <hr>
-        <p>
-            <a href="{{ url_for('list_students') }}" class="back-link">Back to Student List</a> |
-            <a href="{{ url_for('home') }}" class="back-link">Home</a> |
-            <a href="{{ url_for('list_courses') }}" class="back-link">Manage Courses</a> |
-            <a href="{{ url_for('list_teachers') }}" class="back-link">Manage Teachers</a>
-        </p>
+        <a href="{{ url_for('list_teachers') }}" class="back-link">Back to Teacher List</a>
+        <a href="{{ url_for('home') }}" class="back-link">Home</a>
     </div>
 </body>
 </html>

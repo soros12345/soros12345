@@ -19,16 +19,34 @@
         .actions a {
             margin-right: 10px;
         }
-        .message {
+        .message { /* General message styling */
             padding: 10px;
             margin-bottom: 15px;
-            border: 1px solid #ccc;
-            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+        .message.success { /* Specific for success messages */
+            border: 1px solid #d4edda;
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .message.error { /* Specific for error messages */
+            border: 1px solid #f5c6cb;
+            background-color: #f8d7da;
+            color: #721c24;
         }
     </style>
 </head>
 <body>
     <h1>Courses</h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="message {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
     <p><a href="{{ url_for('add_course') }}">Add New Course</a></p>
 
     {% if courses %}
@@ -38,7 +56,7 @@
                     <th>ID</th>
                     <th>Name</th>
                     <th>Description</th>
-                    <th>Teacher ID</th>
+                    <th>Teacher</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -48,7 +66,7 @@
                     <td>{{ course.id }}</td>
                     <td>{{ course.name }}</td>
                     <td>{{ course.description }}</td>
-                    <td>{{ course.teacher_id if course.teacher_id is not none else 'N/A' }}</td>
+                    <td>{{ course.teacher.name if course.teacher else 'Unassigned' }}</td>
                     <td class="actions">
                         <a href="{{ url_for('edit_course', course_id=course.id) }}">Edit</a>
                         <form action="{{ url_for('delete_course', course_id=course.id) }}" method="post" style="display:inline;">
@@ -64,8 +82,9 @@
     {% endif %}
     <hr>
     <p>
-        <a href="{{ url_for('home') }}">Home</a> | 
-        <a href="{{ url_for('list_students') }}">Manage Students</a>
+        <a href="{{ url_for('home') }}">Home</a> |
+        <a href="{{ url_for('list_students') }}">Manage Students</a> |
+        <a href="{{ url_for('list_teachers') }}">Manage Teachers</a>
     </p>
 </body>
 </html>

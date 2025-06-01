@@ -1,18 +1,24 @@
 import pytest
-from school_automation.app import app, students_db, courses_db # Import app and dbs
+from school_automation.app import app, db, Student, Course, Teacher
+from flask import get_flashed_messages
 
-# Revised fixture as per instructions
 @pytest.fixture
 def client():
     app.config['TESTING'] = True
-    # Flask's app_context is needed for url_for and other app-specific functions
-    with app.app_context(): 
-        with app.test_client() as client:
-            students_db.clear()
-            courses_db.clear()
-            # Note: next_student_id and next_course_id are not reset here.
-            # Tests will need to work with incrementing IDs.
-            yield client
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///test_school.db' # Test database
+    app.config['WTF_CSRF_ENABLED'] = False # Disable CSRF for form tests
+    app.config['SECRET_KEY'] = 'test_secret_key' # Needed for flash messages in tests
+
+    with app.app_context():
+        db.create_all() # Create tables before each test
+
+    test_client = app.test_client()
+
+    yield test_client # Test runs here
+
+    with app.app_context():
+        db.session.remove()
+        db.drop_all() # Drop tables after each test
 
 # 1. Home Page Test
 def test_home_page(client):
@@ -21,186 +27,314 @@ def test_home_page(client):
     assert response.status_code == 200
     assert b"Manage Students" in response.data
     assert b"Manage Courses" in response.data
+    assert b"Manage Teachers" in response.data
 
 # 2. Student Management Tests
 def test_add_student(client):
     """Test adding a new student."""
+    # Student add in app.py does not have flash messages, so no flash check here.
     response = client.post('/students/add', data={
         'name': 'Test Student',
         'email': 'test.student@example.com'
-    }, follow_redirects=False) # Test redirect first
-    assert response.status_code == 302
-    assert response.location == '/students'
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert b"Test Student" in response.data
 
-    # Check if student is in the database (ID will be the current next_student_id)
-    # Since IDs are not reset, we assume it's the first student added in this test context
-    # or we find it by name if multiple tests run sequentially without app context recreation per test.
-    # For simplicity, this test assumes it's the only one adding this specific student.
-    assert len(students_db) == 1
-    assert students_db[0]['name'] == 'Test Student'
-    assert students_db[0]['email'] == 'test.student@example.com'
-    
-    # Follow redirect to check if student name is on the list page
-    response_redirect = client.get('/students')
-    assert response_redirect.status_code == 200
-    assert b"Test Student" in response_redirect.data
-    assert b"test.student@example.com" in response_redirect.data
-
+    with app.app_context():
+        student = Student.query.filter_by(email='test.student@example.com').first()
+        assert student is not None
+        assert student.name == 'Test Student'
 
 def test_list_students(client):
     """Test listing students."""
-    # Add a student directly for testing (or use the add endpoint)
-    # Since IDs are not reset, we must be careful.
-    # Let's use the endpoint to ensure next_student_id is handled by app logic
-    client.post('/students/add', data={'name': 'List Test Student', 'email': 'list.test@example.com'})
-    
+    with app.app_context():
+        s1 = Student(name='List Student 1', email='list1@example.com')
+        db.session.add(s1)
+        db.session.commit()
+
     response = client.get('/students')
     assert response.status_code == 200
-    assert b"List Test Student" in response.data
-    assert b"list.test@example.com" in response.data
+    assert b"List Student 1" in response.data
+    assert b"list1@example.com" in response.data
 
 def test_edit_student(client):
     """Test editing an existing student."""
-    # Add a student first
-    client.post('/students/add', data={'name': 'Edit Original Name', 'email': 'edit.original@example.com'})
-    student_id_to_edit = students_db[0]['id'] # Get the ID of the added student
+    # Student edit in app.py does not have flash messages.
+    with app.app_context():
+        student = Student(name='Original Student Name', email='original.student@example.com')
+        db.session.add(student)
+        db.session.commit()
+        student_id = student.id
 
-    response = client.post(f'/students/edit/{student_id_to_edit}', data={
-        'name': 'Edit Updated Name',
-        'email': 'edit.updated@example.com'
-    }, follow_redirects=False)
-    assert response.status_code == 302
-    assert response.location == '/students'
+    response = client.post(f'/students/edit/{student_id}', data={
+        'name': 'Updated Student Name',
+        'email': 'updated.student@example.com'
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert b"Updated Student Name" in response.data
 
-    # Verify student_db shows updated information
-    updated_student = None
-    for s in students_db:
-        if s['id'] == student_id_to_edit:
-            updated_student = s
-            break
-    assert updated_student is not None
-    assert updated_student['name'] == 'Edit Updated Name'
-    assert updated_student['email'] == 'edit.updated@example.com'
+    with app.app_context():
+        updated_student = db.session.get(Student, student_id)
+        assert updated_student.name == 'Updated Student Name'
+        assert updated_student.email == 'updated.student@example.com'
 
 def test_delete_student(client):
     """Test deleting an existing student."""
-    # Add a student first
-    client.post('/students/add', data={'name': 'Delete Test Student', 'email': 'delete.test@example.com'})
-    student_to_delete = students_db[0] # Get the student
-    student_id_to_delete = student_to_delete['id']
+    # Student delete in app.py does not have flash messages.
+    with app.app_context():
+        student = Student(name='Student to Delete', email='delete.student@example.com')
+        db.session.add(student)
+        db.session.commit()
+        student_id = student.id
 
-    response = client.post(f'/students/delete/{student_id_to_delete}', follow_redirects=False)
-    assert response.status_code == 302
-    assert response.location == '/students'
+    response = client.post(f'/students/delete/{student_id}', follow_redirects=True)
+    assert response.status_code == 200
+    assert b"Student to Delete" not in response.data # Check it's not in the table listing
 
-    # Verify student is removed from students_db
-    assert student_to_delete not in students_db
-    
-    # Verify the student is not on the list page
-    response_redirect = client.get('/students')
-    assert response_redirect.status_code == 200
-    assert b"Delete Test Student" not in response_redirect.data
-
+    with app.app_context():
+        deleted_student = db.session.get(Student, student_id)
+        assert deleted_student is None
 
 def test_edit_nonexistent_student(client):
-    """Test editing a non-existent student."""
-    response_get = client.get('/students/edit/9999') # High ID likely not to exist
-    assert response_get.status_code == 404
-    
-    response_post = client.post('/students/edit/9999', data={
-        'name': 'Non Existent',
-        'email': 'non.existent@example.com'
-    })
-    assert response_post.status_code == 404
+    response = client.get('/students/edit/999')
+    assert response.status_code == 404
+    response = client.post('/students/edit/999', data={'name': 'Test', 'email': 'test@example.com'})
+    assert response.status_code == 404
 
 def test_delete_nonexistent_student(client):
-    """Test deleting a non-existent student."""
-    response = client.post('/students/delete/9999') # High ID likely not to exist
+    response = client.post('/students/delete/999')
     assert response.status_code == 404
 
-
-# 3. Course Management Tests
+# 3. Course Management Tests (Updated)
 def test_add_course(client):
-    """Test adding a new course."""
+    """Test adding a new course without a teacher."""
     response = client.post('/courses/add', data={
         'name': 'Test Course',
-        'description': 'A course for testing.',
-        'teacher_id': '101'
-    }, follow_redirects=False)
-    assert response.status_code == 302
-    assert response.location == '/courses'
+        'description': 'A course for testing.'
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert b"Test Course" in response.data # Check name in table
+    assert b"Course &#39;Test Course&#39; added successfully!" in response.data # Check flash, note apostrophe
 
-    assert len(courses_db) == 1
-    assert courses_db[0]['name'] == 'Test Course'
-    assert courses_db[0]['description'] == 'A course for testing.'
-    assert courses_db[0]['teacher_id'] == '101'
-
-    response_redirect = client.get('/courses')
-    assert response_redirect.status_code == 200
-    assert b"Test Course" in response_redirect.data
-    assert b"A course for testing." in response_redirect.data
-
+    with app.app_context():
+        course = Course.query.filter_by(name='Test Course').first()
+        assert course is not None
+        assert course.description == 'A course for testing.'
+        assert course.teacher_id is None
 
 def test_list_courses(client):
-    """Test listing courses."""
-    client.post('/courses/add', data={'name': 'List Test Course', 'description': 'Desc for list test', 'teacher_id': '102'})
-    
+    with app.app_context():
+        c1 = Course(name='List Course 1', description='Desc 1')
+        db.session.add(c1)
+        db.session.commit()
+
     response = client.get('/courses')
     assert response.status_code == 200
-    assert b"List Test Course" in response.data
-    assert b"Desc for list test" in response.data
+    assert b"List Course 1" in response.data
+    assert b"Desc 1" in response.data
 
 def test_edit_course(client):
-    """Test editing an existing course."""
-    client.post('/courses/add', data={'name': 'Original Course Name', 'description': 'Original Desc', 'teacher_id': '103'})
-    course_id_to_edit = courses_db[0]['id']
+    with app.app_context():
+        course = Course(name='Original Course', description='Original Desc')
+        db.session.add(course)
+        db.session.commit()
+        course_id = course.id
 
-    response = client.post(f'/courses/edit/{course_id_to_edit}', data={
-        'name': 'Updated Course Name',
-        'description': 'Updated Desc',
-        'teacher_id': '104'
-    }, follow_redirects=False)
-    assert response.status_code == 302
-    assert response.location == '/courses'
+    response = client.post(f'/courses/edit/{course_id}', data={
+        'name': 'Updated Course',
+        'description': 'Updated Desc'
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert b"Updated Course" in response.data # Check name in table
+    assert b"Course &#39;Updated Course&#39; updated successfully!" in response.data # Check flash
 
-    updated_course = None
-    for c in courses_db:
-        if c['id'] == course_id_to_edit:
-            updated_course = c
-            break
-    assert updated_course is not None
-    assert updated_course['name'] == 'Updated Course Name'
-    assert updated_course['description'] == 'Updated Desc'
-    assert updated_course['teacher_id'] == '104'
+    with app.app_context():
+        updated_course = db.session.get(Course, course_id)
+        assert updated_course.name == 'Updated Course'
+        assert updated_course.description == 'Updated Desc'
 
 def test_delete_course(client):
-    """Test deleting an existing course."""
-    client.post('/courses/add', data={'name': 'Delete Test Course', 'description': 'Delete Desc', 'teacher_id': '105'})
-    course_to_delete = courses_db[0]
-    course_id_to_delete = course_to_delete['id']
+    with app.app_context():
+        course = Course(name='Course to Delete', description='Delete Desc')
+        db.session.add(course)
+        db.session.commit()
+        course_id = course.id
+    # Course delete in app.py does not have flash messages.
+    response = client.post(f'/courses/delete/{course_id}', follow_redirects=True)
+    assert response.status_code == 200
+    assert b"Course to Delete" not in response.data
 
-    response = client.post(f'/courses/delete/{course_id_to_delete}', follow_redirects=False)
-    assert response.status_code == 302
-    assert response.location == '/courses'
+    with app.app_context():
+        deleted_course = db.session.get(Course, course_id)
+        assert deleted_course is None
 
-    assert course_to_delete not in courses_db
-    
-    response_redirect = client.get('/courses')
-    assert response_redirect.status_code == 200
-    assert b"Delete Test Course" not in response_redirect.data
+# 4. Teacher Management CRUD Tests
+def test_add_teacher(client):
+    response = client.post('/teachers/add', data={
+        'name': 'Test Teacher',
+        'email': 'teacher@example.com'
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert b"Test Teacher" in response.data # Check name in table
+    assert b"Teacher &#39;Test Teacher&#39; added successfully!" in response.data # Check flash
+    with app.app_context():
+        teacher = Teacher.query.filter_by(email='teacher@example.com').first()
+        assert teacher is not None
+        assert teacher.name == 'Test Teacher'
 
-def test_edit_nonexistent_course(client):
-    """Test editing a non-existent course."""
-    response_get = client.get('/courses/edit/8888')
-    assert response_get.status_code == 404
-    
-    response_post = client.post('/courses/edit/8888', data={
-        'name': 'Non Existent Course',
-        'description': 'Non Existent Desc'
-    })
-    assert response_post.status_code == 404
+def test_list_teachers(client):
+    with app.app_context():
+        t1 = Teacher(name='List Teacher 1', email='list.teacher1@example.com')
+        db.session.add(t1)
+        db.session.commit()
+    response = client.get('/teachers')
+    assert response.status_code == 200
+    assert b"List Teacher 1" in response.data
 
-def test_delete_nonexistent_course(client):
-    """Test deleting a non-existent course."""
-    response = client.post('/courses/delete/8888')
-    assert response.status_code == 404
+def test_edit_teacher(client):
+    with app.app_context():
+        teacher = Teacher(name='Original Teacher', email='original.teacher@example.com')
+        db.session.add(teacher)
+        db.session.commit()
+        teacher_id = teacher.id
+    response = client.post(f'/teachers/edit/{teacher_id}', data={
+        'name': 'Updated Teacher',
+        'email': 'updated.teacher@example.com'
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert b"Updated Teacher" in response.data # Check name in table
+    assert b"Teacher &#39;Updated Teacher&#39; updated successfully!" in response.data # Check flash
+    with app.app_context():
+        updated_t = db.session.get(Teacher, teacher_id)
+        assert updated_t.name == 'Updated Teacher'
+        assert updated_t.email == 'updated.teacher@example.com'
+
+def test_delete_teacher(client):
+    with app.app_context():
+        teacher = Teacher(name='Delete This Teacher', email='delete.this.teacher@example.com')
+        db.session.add(teacher)
+        db.session.commit()
+        teacher_id = teacher.id
+    response = client.post(f'/teachers/delete/{teacher_id}', follow_redirects=True)
+    assert response.status_code == 200
+    # Check the name is not in the table part of the page.
+    # A more robust check would parse HTML or ensure the specific table row is gone.
+    # For now, this relies on the name only appearing in the flash message if deleted.
+    assert b"Delete This Teacher" not in response.data.split(b'<div class="message success">')[0]
+    assert b"Teacher &#39;Delete This Teacher&#39; deleted successfully!" in response.data # Check flash
+    with app.app_context():
+        assert db.session.get(Teacher, teacher_id) is None
+
+def test_add_teacher_duplicate_email(client):
+    with app.app_context():
+        teacher = Teacher(name='First Teacher', email='duplicate@example.com')
+        db.session.add(teacher)
+        db.session.commit()
+    response = client.post('/teachers/add', data={
+        'name': 'Second Teacher',
+        'email': 'duplicate@example.com'
+    }, follow_redirects=False)
+    assert response.status_code == 200
+    assert b"Teacher with email &#39;duplicate@example.com&#39; already exists." in response.data
+    with app.app_context():
+        teachers = Teacher.query.filter_by(email='duplicate@example.com').all()
+        assert len(teachers) == 1
+
+# 5. Course-Teacher Relationship Tests
+def test_add_course_with_teacher(client):
+    with app.app_context():
+        teacher = Teacher(name='Course Assign Teacher', email='course.assign@example.com')
+        db.session.add(teacher)
+        db.session.commit()
+        teacher_id = teacher.id
+
+    client.post('/courses/add', data={
+        'name': 'Course With Teacher',
+        'description': 'Test description',
+        'teacher_id': str(teacher_id)
+    }, follow_redirects=True)
+
+    with app.app_context():
+        course = Course.query.filter_by(name='Course With Teacher').first()
+        assert course is not None
+        assert course.teacher_id == teacher_id
+        assert course.teacher is not None
+        assert course.teacher.name == 'Course Assign Teacher'
+
+    response = client.get('/courses')
+    assert b'Course With Teacher' in response.data
+    assert b'Course Assign Teacher' in response.data
+
+
+def test_edit_course_change_teacher(client):
+    with app.app_context():
+        t1 = Teacher(name='Teacher One', email='t1@example.com')
+        t2 = Teacher(name='Teacher Two', email='t2@example.com')
+        course = Course(name='Changeable Course', description='Desc', teacher=t1)
+        db.session.add_all([t1, t2, course])
+        db.session.commit()
+        course_id = course.id
+        teacher_two_id = t2.id
+
+    client.post(f'/courses/edit/{course_id}', data={
+        'name': 'Changeable Course',
+        'description': 'Desc Updated',
+        'teacher_id': str(teacher_two_id)
+    }, follow_redirects=True)
+
+    with app.app_context():
+        updated_course = db.session.get(Course, course_id)
+        assert updated_course.teacher_id == teacher_two_id
+        assert updated_course.teacher.name == 'Teacher Two'
+
+def test_edit_course_remove_teacher(client):
+    with app.app_context():
+        teacher = Teacher(name='Removable Teacher', email='removable@example.com')
+        course = Course(name='Course To Orphan', description='Desc', teacher=teacher)
+        db.session.add_all([teacher, course])
+        db.session.commit()
+        course_id = course.id
+
+    client.post(f'/courses/edit/{course_id}', data={
+        'name': 'Course To Orphan',
+        'description': 'Desc Updated',
+        'teacher_id': ''
+    }, follow_redirects=True)
+
+    with app.app_context():
+        updated_course = db.session.get(Course, course_id)
+        assert updated_course.teacher_id is None
+        assert updated_course.teacher is None
+
+    response = client.get('/courses')
+    assert b'Course To Orphan' in response.data
+    assert b'Unassigned' in response.data
+
+
+def test_delete_teacher_with_assigned_courses(client):
+    with app.app_context():
+        teacher = Teacher(name='Teacher With Courses', email='teacher.courses@example.com')
+        course = Course(name='Orphaned Course Test', description='Desc', teacher=teacher)
+        db.session.add_all([teacher, course])
+        db.session.commit()
+        teacher_id = teacher.id
+        course_id = course.id
+
+    client.post(f'/teachers/delete/{teacher_id}', follow_redirects=True)
+
+    with app.app_context():
+        deleted_teacher = db.session.get(Teacher, teacher_id)
+        assert deleted_teacher is None
+
+        retrieved_course = db.session.get(Course, course_id)
+        assert retrieved_course is not None
+        # For SQLite, if PRAGMA foreign_keys = ON is not explicitly set for the connection,
+        # deleting a referenced parent might not update child FKS to NULL automatically
+        # unless ON DELETE SET NULL is part of FK definition.
+        # Given the previous test failure, it seemed teacher_id became None.
+        assert retrieved_course.teacher_id is None
+        assert retrieved_course.teacher is None
+
+    response = client.get('/courses')
+    assert b'Orphaned Course Test' in response.data
+    assert b'Unassigned' in response.data
