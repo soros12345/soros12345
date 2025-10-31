@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF'den Soru Üret</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>PDF'den Soru Üretme</h1>
+        <p class="lead">Lütfen bir PDF dosyası yükleyin ve kaç soru üretmek istediğinizi belirtin.</p>
+
+        <form action="{{ url_for('soru_uret') }}" method="post" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="pdf_file">PDF Dosyası</label>
+                <input type="file" class="form-control-file" id="pdf_file" name="pdf_file" accept=".pdf" required>
+            </div>
+            <div class="form-group">
+                <label for="question_count">Soru Sayısı</label>
+                <input type="number" class="form-control" id="question_count" name="question_count" min="1" max="20" value="5" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Soruları Üret</button>
+        </form>
+
+        {% if questions %}
+        <div class="mt-5">
+            <h2>Üretilen Sorular</h2>
+            <ul>
+                {% for question in questions %}
+                <li>{{ question }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="mt-4">
+              {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+    </div>
+</body>
+</html>

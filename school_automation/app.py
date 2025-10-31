@@ -1,8 +1,15 @@
 from flask import Flask, render_template, request, redirect, url_for, abort, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+import io
+from PyPDF2 import PdfReader
+from transformers import T5ForConditionalGeneration, T5Tokenizer
 
 app = Flask(__name__)
+# Initialize model and tokenizer
+model_name = "valhalla/t5-base-qg-hl"
+tokenizer = T5Tokenizer.from_pretrained(model_name)
+model = T5ForConditionalGeneration.from_pretrained(model_name)
 app.secret_key = 'dev_secret_key' # Needed for flash messages
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///school.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -282,6 +289,60 @@ def delete_teacher(teacher_id):
         # Potentially, if there are related courses that prevent deletion due to foreign key constraints (once added)
         # For now, this generic error handling is a placeholder.
     return redirect(url_for('list_teachers'))
+
+# PDF Question Generation Route
+@app.route('/soru-uret', methods=['GET', 'POST'])
+def soru_uret():
+    if request.method == 'POST':
+        if 'pdf_file' not in request.files:
+            flash('No file part', 'error')
+            return redirect(request.url)
+
+        file = request.files['pdf_file']
+
+        if file.filename == '':
+            flash('No selected file', 'error')
+            return redirect(request.url)
+
+        if file and file.filename.endswith('.pdf'):
+            try:
+                pdf_stream = io.BytesIO(file.read())
+                reader = PdfReader(pdf_stream)
+                text = ""
+                for page in reader.pages:
+                    text += page.extract_text() or ""
+
+                if not text.strip():
+                    flash('Could not extract text from PDF.', 'error')
+                    return render_template('soru_uret.html', questions=None)
+
+                question_count = int(request.form.get('question_count', 5))
+
+                # Preprocess text for the model
+                input_text = "generate questions: " + text
+                input_ids = tokenizer.encode(input_text, return_tensors="pt", max_length=512, truncation=True)
+
+                # Generate questions
+                outputs = model.generate(
+                    input_ids,
+                    max_length=64,
+                    num_beams=4,
+                    early_stopping=True,
+                    num_return_sequences=question_count
+                )
+
+                questions = [tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
+
+                return render_template('soru_uret.html', questions=questions)
+
+            except Exception as e:
+                flash(f'An error occurred: {e}', 'error')
+                return redirect(request.url)
+        else:
+            flash('Invalid file type. Please upload a PDF.', 'error')
+            return redirect(request.url)
+
+    return render_template('soru_uret.html', questions=None)
 
 if __name__ == '__main__':
     app.run(debug=True)

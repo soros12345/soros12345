@@ -1,6 +1,8 @@
 import pytest
 from school_automation.app import app, db, Student, Course, Teacher
 from flask import get_flashed_messages
+from unittest.mock import patch, MagicMock
+import io
 
 @pytest.fixture
 def client():
@@ -338,3 +340,76 @@ def test_delete_teacher_with_assigned_courses(client):
     response = client.get('/courses')
     assert b'Orphaned Course Test' in response.data
     assert b'Unassigned' in response.data
+
+# 6. PDF Question Generation Test
+def test_question_generation_page(client):
+    """Test the PDF question generation page loads."""
+    response = client.get('/soru-uret')
+    assert response.status_code == 200
+    assert b"PDF'den Soru \xc3\x9cretme" in response.data
+
+def test_question_generation_no_file(client):
+    """Test submitting the form with no file."""
+    response = client.post('/soru-uret', data={}, follow_redirects=True)
+    assert response.status_code == 200
+    assert b"No file part" in response.data
+
+def test_question_generation_empty_filename(client):
+    """Test submitting the form with an empty filename."""
+    from werkzeug.datastructures import FileStorage
+    import io
+
+    data = {
+        'pdf_file': (io.BytesIO(b""), ''),
+        'question_count': '5'
+    }
+    response = client.post('/soru-uret', data=data, content_type='multipart/form-data', follow_redirects=True)
+    assert response.status_code == 200
+    assert b"No selected file" in response.data
+
+def test_question_generation_invalid_file_type(client):
+    """Test submitting the form with a non-PDF file."""
+    from werkzeug.datastructures import FileStorage
+    import io
+
+    data = {
+        'pdf_file': (io.BytesIO(b"this is a text file"), 'test.txt'),
+        'question_count': '5'
+    }
+    response = client.post('/soru-uret', data=data, content_type='multipart/form-data', follow_redirects=True)
+    assert response.status_code == 200
+    assert b"Invalid file type. Please upload a PDF." in response.data
+
+@patch('school_automation.app.PdfReader')
+@patch('school_automation.app.tokenizer')
+@patch('school_automation.app.model')
+def test_question_generation_success(mock_model, mock_tokenizer, mock_pdf_reader, client):
+    """Test the successful generation of questions from a PDF."""
+    # Mock PdfReader
+    mock_pdf_instance = MagicMock()
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = "This is the content of the PDF."
+    mock_pdf_instance.pages = [mock_page]
+    mock_pdf_reader.return_value = mock_pdf_instance
+
+    # Mock tokenizer and model
+    mock_tokenizer.encode.return_value = "mock_input_ids"
+    mock_model.generate.return_value = ["mock_output_ids"]
+    mock_tokenizer.decode.return_value = "Generated Question 1?"
+
+    pdf_content = b'dummy pdf content'
+    data = {
+        'pdf_file': (io.BytesIO(pdf_content), 'test.pdf'),
+        'question_count': '1'
+    }
+
+    response = client.post('/soru-uret', data=data, content_type='multipart/form-data')
+
+    assert response.status_code == 200
+    assert b"Generated Question 1?" in response.data
+
+    # Verify that our mocks were called as expected
+    mock_pdf_reader.assert_called_once()
+    mock_tokenizer.encode.assert_called_once_with("generate questions: This is the content of the PDF.", return_tensors="pt", max_length=512, truncation=True)
+    mock_model.generate.assert_called_once_with("mock_input_ids", max_length=64, num_beams=4, early_stopping=True, num_return_sequences=1)
+    mock_tokenizer.decode.assert_called_once_with("mock_output_ids", skip_special_tokens=True)
